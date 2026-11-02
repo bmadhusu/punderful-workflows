@@ -43,7 +43,7 @@ npx wrangler d1 migrations apply punderful --remote
 Create the index with the settings of embedding model we are going to use
 
 ```bash
-npx wrangler vectorize create punderful --preset "@cf/baai/bge-large-en-v1.5"
+npx wrangler vectorize create punderful --dimensions=1024 --metric=cosine "@cf/baai/bge-large-en-v1.5"
 ```
 
 (This is already in wrangler.toml)

@@ -37,6 +37,31 @@ export class PublishWorkflow extends WorkflowEntrypoint<Env, PublishParams> {
         "OPENAI_API_KEY is not present in your environment, set it to enable moderation",
       );
     }
+
+    // step: Wait For a human moderator to approve or reject
+    let approved = false;
+    try {
+      const decision = await step.waitForEvent<{ approved: boolean }>(
+        "wait-for-moderator",
+        {
+          type: "moderator-decision",
+          timeout: "1 hour",
+        },
+      );
+      approved = decision.payload.approved;
+    } catch (e) {
+      // no decision arrived before the timeout
+      console.warn(`No moderator decision for pun ${punId}`);
+    }
+    if (!approved) {
+      await step.do("mark-rejected", async () => {
+        await this.env.DB.prepare(`UPDATE puns SET status=? WHERE id=?`)
+          .bind("flagged", punId)
+          .run();
+      });
+      return;
+    }
+
     // step: Create embedding for indexing
     const punEmbedding = await step.do("create-pun-embedding", async () => {
       const results = await this.env.AI.run("@cf/baai/bge-large-en-v1.5", {

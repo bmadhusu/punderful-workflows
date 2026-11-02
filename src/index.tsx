@@ -11,6 +11,7 @@ import New from "./pages/New";
 import Me from "./pages/Me";
 import Detail from "./pages/Detail";
 import Search from "./pages/Search";
+import Admin from "./pages/Admin";
 
 export {
   PublishWorkflow,
@@ -77,15 +78,15 @@ app.use(
         </body>
       </html>
     );
-  })
+  }),
 );
 
 async function insertPun(
   c: Context<{ Bindings: Env; Variables: Variables }>,
-  pun: string
+  pun: string,
 ): Promise<string> {
   const results = await c.env.DB.prepare(
-    `INSERT INTO puns (id, pun, status, creator) VALUES (?, ?, ?, ?) RETURNING id;`
+    `INSERT INTO puns (id, pun, status, creator) VALUES (?, ?, ?, ?) RETURNING id;`,
   )
     .bind(crypto.randomUUID(), pun, "draft", c.get("userId"))
     .run();
@@ -94,7 +95,7 @@ async function insertPun(
 
 async function getSimilarPunIdsById(
   c: Context<{ Bindings: Env; Variables: Variables }>,
-  punId: string
+  punId: string,
 ): Promise<Array<string>> {
   const punVectors = await c.env.VECTORIZE.getByIds([
     `content-${punId}`,
@@ -121,7 +122,7 @@ async function getSimilarPunIdsById(
 }
 
 async function getLikedPunsForUser(
-  c: Context<{ Bindings: Env; Variables: Variables }>
+  c: Context<{ Bindings: Env; Variables: Variables }>,
 ) {
   const userId = c.get("userId");
   let userFieldName = "user_id";
@@ -139,7 +140,7 @@ async function getLikedPunsForUser(
 		AND
 			pun_interactions.interaction_type = 'like'
 		ORDER BY pun_interactions.created_at DESC;
-	`
+	`,
   )
     .bind(userId)
     .all();
@@ -157,7 +158,7 @@ async function punsByIds(c: Context, punIds: Array<string>) {
 app.get("/api/puns", async (c) => {
   // TODO: paging
   const { results } = await c.env.DB.prepare(
-    `SELECT * FROM puns WHERE status='published' ORDER BY created_at DESC`
+    `SELECT * FROM puns WHERE status='published' ORDER BY created_at DESC`,
   ).all();
   return c.json({ results });
 });
@@ -166,6 +167,7 @@ app.post("/api/puns", async (c) => {
   const payload = await c.req.json();
   const punId = await insertPun(c, payload.pun);
   const workflow = await c.env.PUBLISH.create({
+    id: punId,
     params: {
       punId,
       pun: payload.pun,
@@ -200,10 +202,14 @@ app.get("/api/puns/search", async (c) => {
   return c.json({ results: puns });
 });
 
-app.get('/api/puns/mine', async (c) => {
-	const createdResponse = await c.env.DB.prepare(`SELECT * FROM puns WHERE creator=? ORDER BY created_at DESC`).bind(c.get('userId')).all();
-	const liked = await getLikedPunsForUser(c);
-	return c.json({ created: createdResponse.results, liked: liked });
+app.get("/api/puns/mine", async (c) => {
+  const createdResponse = await c.env.DB.prepare(
+    `SELECT * FROM puns WHERE creator=? ORDER BY created_at DESC`,
+  )
+    .bind(c.get("userId"))
+    .all();
+  const liked = await getLikedPunsForUser(c);
+  return c.json({ created: createdResponse.results, liked: liked });
 });
 
 app.get("/api/puns/:punId", async (c) => {
@@ -237,7 +243,7 @@ app.get("/api/puns/:punId/similar", async (c) => {
 async function addInteraction(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   punId: string,
-  interactionType: string
+  interactionType: string,
 ) {
   const userId = c.get("userId") as string;
   const workflow = await c.env.INTERACTION.create({
@@ -246,7 +252,7 @@ async function addInteraction(
       punId,
       interactionType,
       cf: c.req.raw.cf,
-    }
+    },
   });
   return true;
 }
@@ -255,6 +261,33 @@ app.post("/api/puns/:punId/like", async (c) => {
   const punId = c.req.param("punId");
   await addInteraction(c, punId, "like");
   return c.json({ success: true });
+});
+
+app.get("/api/admin/pending", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM puns WHERE status='draft' ORDER BY created_at DESC`,
+  ).all();
+  return c.json({ results });
+});
+
+app.post("/api/admin/puns/:punId/decision", async (c) => {
+  const punId = c.req.param("punId");
+  const { approved } = await c.req.json();
+  try {
+    const instance = await c.env.PUBLISH.get(punId);
+    await instance.sendEvent({
+      type: "moderator-decision",
+      payload: { approved },
+    });
+  } catch (e) {
+    console.error(`Could not send decision for ${punId}`, e);
+    return c.json({ success: false }, 404);
+  }
+  return c.json({ success: true });
+});
+
+app.get("/admin", (c) => {
+  return c.render(<Admin />);
 });
 
 app.get("/", (c) => {
@@ -280,13 +313,14 @@ app.get("/puns/:punId", async (c) => {
   return c.render(<Detail />);
 });
 
-
 async function getAsset(c: Context, pathName: string) {
-	const asset = await c.env.ASSETS.unstable_getByPathname(pathName);
-	if (!asset) {
-		throw new Error('missing asset!');
-	}
-	return new Response(asset.readableStream, { headers: { 'Content-Type': asset.contentType } });
+  const asset = await c.env.ASSETS.unstable_getByPathname(pathName);
+  if (!asset) {
+    throw new Error("missing asset!");
+  }
+  return new Response(asset.readableStream, {
+    headers: { "Content-Type": asset.contentType },
+  });
 }
 
 /* Uncomment if you want to upload
@@ -317,4 +351,4 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(env.LEADERBOARD_WORKFLOW.create());
   },
-}
+};
