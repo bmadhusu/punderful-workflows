@@ -1,0 +1,52 @@
+{
+  "name": "punderful",
+  "main": "src/index.tsx",
+  "compatibility_date": "2024-10-22",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "punderful",
+      "database_id": "local"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "publish",
+      "binding": "PUBLISH",
+      "class_name": "PublishWorkflow"
+    },
+    {
+      "name": "interaction",
+      "binding": "INTERACTION",
+      "class_name": "InteractionWorkfow"
+    },
+    {
+      "name": "leaderboard",
+      "binding": "LEADERBOARD_WORKFLOW",
+      "class_name": "LeaderboardWorkflow"
+    },
+    {
+      "name": "puntificator",
+      "binding": "PUNTIFICATOR",
+      "class_name": "PuntificatorWorkflow"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "LEADERBOARD",
+      "id": "078bb390cd0d436e923171c56db68685"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/30 * * * *"
+    ]
+  },
+  "vars": {
+    "LM_STUDIO_URL": "http://wendys-macbook-pro.tail325f7a.ts.net:1234"
+  }
+}

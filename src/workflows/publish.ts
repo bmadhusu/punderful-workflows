@@ -11,6 +11,43 @@ export type PublishParams = {
   pun: string;
 };
 
+async function talkToLLM(baseUrl: string, pun: string) {
+  console.log(`[LLM] calling ${baseUrl} for "${pun}"`);
+  const response = await fetch(baseUrl + "/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: "system",
+          content: `You help categorize puns for people to search for later.
+
+                The user is going to give you a pun and your job is to list the most relevant categories for the pun, based on the content of the pun.
+
+		Do not include words about pun in general, focus on what the content is about. For instance don't return "word play" or "pun" as a category.
+
+		Return only the categories, comma separated. Do not include a preamble or introudction, just the categories.
+		`,
+        },
+        { role: "user", content: pun },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Chat completion failed: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  if (data.choices[0]?.message?.content === "") {
+    throw new Error("No response from LLM!");
+  }
+  console.log(`[LLM] "${pun}" => ${data.choices[0]?.message?.content}`);
+  return data.choices[0]?.message?.content;
+}
+
 export class PublishWorkflow extends WorkflowEntrypoint<Env, PublishParams> {
   async run(event: WorkflowEvent<PublishParams>, step: WorkflowStep) {
     const { pun, punId } = event.payload;
@@ -62,13 +99,6 @@ export class PublishWorkflow extends WorkflowEntrypoint<Env, PublishParams> {
       return;
     }
 
-    // step: Create embedding for indexing
-    const punEmbedding = await step.do("create-pun-embedding", async () => {
-      const results = await this.env.AI.run("@cf/baai/bge-large-en-v1.5", {
-        text: pun,
-      });
-      return results.data[0];
-    });
     // step: Categorize
     const categories = await step.do(
       "categorize-pun",
@@ -81,71 +111,10 @@ export class PublishWorkflow extends WorkflowEntrypoint<Env, PublishParams> {
         timeout: "1 minute",
       },
       async () => {
-        const results = await this.env.AI.run(
-          "@cf/meta/llama-3.1-8b-instruct-fp8",
-          {
-            messages: [
-              {
-                role: "system",
-                content: `You help categorize puns for people to search for later.
-
-							The user is going to give you a pun and your job is to list the most relevant categories for the pun, based on the content of the pun.
-
-							Do not include words about pun in general, focus on what the content is about. For instance don't return "word play" or "pun" as a category.
-
-							Return only the categories, comma separated. Do not include a preamble or introudction, just the categories.
-							`,
-              },
-              { role: "user", content: pun },
-            ],
-          },
-          {
-            gateway: {
-              id: "default",
-            },
-          },
-        );
-        // @ts-ignore
-        return results.response;
+        const results = await talkToLLM(this.env.LM_STUDIO_URL, pun);
+        return results;
       },
     );
-    // step: Index categories
-    const categoriesEmbedding = await step.do(
-      "create-categories-embedding",
-      async () => {
-        const results = await this.env.AI.run("@cf/baai/bge-large-en-v1.5", {
-          text: categories,
-        });
-        return results.data[0];
-      },
-    );
-    // step: Add to Vectorize
-    await step.do("add-embeddings-to-vector-store", async () => {
-      await this.env.VECTORIZE.upsert([
-        {
-          id: `content-${punId}`,
-          values: punEmbedding,
-          namespace: "content",
-          metadata: {
-            punId,
-            pun,
-            categories,
-          },
-        },
-      ]);
-      await this.env.VECTORIZE.upsert([
-        {
-          id: `categories-${punId}`,
-          values: categoriesEmbedding,
-          namespace: "categories",
-          metadata: {
-            punId,
-            pun,
-            categories,
-          },
-        },
-      ]);
-    });
     // Step: Update the db
     await step.do("update-status-to-published", async () => {
       const results = await this.env.DB.prepare(

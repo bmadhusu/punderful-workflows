@@ -1,6 +1,7 @@
 import { Hono, Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { jsxRenderer } from "hono/jsx-renderer";
+import { SCHEMA } from "./schema";
 
 import { PublishWorkflow } from "./workflows/publish";
 import { InteractionWorkfow } from "./workflows/interaction";
@@ -26,6 +27,16 @@ type Variables = {
 };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// celld dev can't run migrations, so create tables on first request
+let schemaReady = false;
+app.use("*", async (c, next) => {
+  if (!schemaReady) {
+    await c.env.DB.exec(SCHEMA);
+    schemaReady = true;
+  }
+  await next();
+});
 
 // Add a session cookie to all requests
 app.use("*", async (c, next) => {
@@ -97,6 +108,8 @@ async function getSimilarPunIdsById(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   punId: string,
 ): Promise<Array<string>> {
+  return [];
+
   const punVectors = await c.env.VECTORIZE.getByIds([
     `content-${punId}`,
     `categories-${punId}`,
@@ -183,23 +196,16 @@ app.get("/api/puns/trending", async (c) => {
 
 app.get("/api/puns/search", async (c) => {
   const query = c.req.query("q") || "";
-  if (query === undefined) {
+  if (query === "") {
     return c.json({ results: [] });
   }
-  const embeddings = await c.env.AI.run("@cf/baai/bge-large-en-v1.5", {
-    text: query,
-  });
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM puns WHERE status='published' AND pun LIKE ? ORDER BY created_at DESC LIMIT 20`,
+  )
+    .bind(`%${query}%`)
+    .all();
 
-  const results = await c.env.VECTORIZE.query(embeddings.data[0], {
-    namespace: "content",
-    topK: 20,
-    returnMetadata: true,
-  });
-  const ids = results.matches
-    .filter((r) => r.score > 0.5)
-    .map((r) => r?.metadata?.punId) as Array<string>;
-  const puns = await punsByIds(c, ids);
-  return c.json({ results: puns });
+  return c.json({ results });
 });
 
 app.get("/api/puns/mine", async (c) => {
