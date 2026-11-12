@@ -200,7 +200,7 @@ app.get("/api/puns/search", async (c) => {
     return c.json({ results: [] });
   }
   const { results } = await c.env.DB.prepare(
-    `SELECT * FROM puns WHERE status='published' AND pun LIKE ? ORDER BY created_at DESC LIMIT 20`,
+    `SELECT * FROM puns WHERE status='published' AND (pun LIKE ?1 OR categories LIKE ?1) ORDER BY created_at DESC LIMIT 20`,
   )
     .bind(`%${query}%`)
     .all();

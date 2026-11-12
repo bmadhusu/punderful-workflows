@@ -111,16 +111,20 @@ export class PublishWorkflow extends WorkflowEntrypoint<Env, PublishParams> {
         timeout: "1 minute",
       },
       async () => {
+        if (this.env.LLM_FAKE === "true") {
+          return "Test, Offline";
+        }
         const results = await talkToLLM(this.env.LM_STUDIO_URL, pun);
         return results;
       },
     );
+
     // Step: Update the db
-    await step.do("update-status-to-published", async () => {
+    await step.do("save-categories-and-publish", async () => {
       const results = await this.env.DB.prepare(
-        `UPDATE puns SET status=? WHERE id=?`,
+        `UPDATE puns SET status=?, categories=? WHERE id=?`,
       )
-        .bind("published", punId)
+        .bind("published", categories, punId)
         .run();
     });
   }
